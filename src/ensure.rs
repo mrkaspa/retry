@@ -35,6 +35,16 @@ pub fn execute(json: web::Json<RetryPayload>) -> actix_web::Result<HttpResponse,
 }
 
 fn ensure(payload: RetryPayload) -> Result<(), RetryError> {
+    let res = send(payload);
+    if let Err(error) = res {
+        if error.retry_no > 0 {
+            // TODO send in amqp
+        }
+    }
+    res
+}
+
+fn send(payload: RetryPayload) -> Result<(), RetryError> {
     let mut sys = actix::System::new("request");
     let retries = payload.retries;
     sys.block_on(lazy(|| {
