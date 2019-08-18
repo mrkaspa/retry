@@ -27,15 +27,16 @@ pub fn execute(json: web::Json<RetryPayload>) -> actix_web::Result<HttpResponse,
         Ok(()) => Ok(HttpResponse::Ok().json(RetryResponse {
             message: String::from("all ok"),
         })),
-        Err(_) => Err(GeneralError {
+        Err(err) => Err(GeneralError {
             status: 402,
-            message: String::from("missing name param"),
+            message: format!("Failed will retry {} times", err.retry_no),
         }),
     }
 }
 
 fn ensure(payload: RetryPayload) -> Result<(), RetryError> {
     let mut sys = actix::System::new("request");
+    let retries = payload.retries;
     sys.block_on(lazy(|| {
         let client = Client::default();
         let mut req_head = RequestHead::default();
@@ -50,7 +51,7 @@ fn ensure(payload: RetryPayload) -> Result<(), RetryError> {
         client
             .request_from(payload.request_url, &req_head)
             .send_body(payload.payload)
-            .map_err(|_| RetryError { retry_no: 0 })
+            .map_err(|_| RetryError { retry_no: retries })
             .and_then(|response| {
                 // <- server http response
                 println!("Response: {:?}", response);
