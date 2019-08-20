@@ -1,6 +1,4 @@
-use actix_web::{
-    self,  web, App, HttpRequest, HttpServer, Responder,
-};
+use actix_web::{self, web, App, HttpRequest, HttpServer, Responder};
 
 mod ensure;
 mod utils;
@@ -12,7 +10,7 @@ fn health(_req: HttpRequest) -> impl Responder {
 fn main() {
     HttpServer::new(|| {
         App::new()
-            .route("/ensure", web::get().to(ensure::execute))
+            .route("/ensure", web::get().to_async(ensure::execute))
             .route("/health", web::get().to(health))
     })
     .bind("127.0.0.1:8000")
