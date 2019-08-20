@@ -17,7 +17,7 @@ impl error::ResponseError for GeneralError {
     }
 }
 
-#[derive(Debug, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct RetryError {
     pub retry_no: u32,
 }
