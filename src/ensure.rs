@@ -1,48 +1,16 @@
-use crate::utils::{GeneralError, RetryError};
+use crate::structs::RetryPayload;
+use crate::utils::RetryError;
 use actix_http::http::{header, Method};
 use actix_http::RequestHead;
 use actix_web::client::Client;
-use actix_web::{self, web, HttpResponse};
 use futures::future::Future;
 use log::{error, info};
-use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
-pub struct RetryPayload {
-    reference: String,
-    retries: u32,
-    method: String,
-    headers: Vec<(String, String)>,
-    request_url: String,
-    payload: String,
-}
-
-#[derive(Serialize)]
-pub struct RetryResponse {
-    message: String,
-}
-
-pub fn execute(
-    json: web::Json<RetryPayload>,
-) -> impl Future<Item = HttpResponse, Error = GeneralError> {
-    info!("Request arrived");
-    let payload = json.into_inner();
-    ensure(payload)
-        .and_then(|_| {
-            Ok(HttpResponse::Ok().json(RetryResponse {
-                message: String::from("all ok"),
-            }))
-        })
-        .map_err(|err| GeneralError {
-            status: 402,
-            message: format!("Failed will retry {} times", err.retry_no),
-        })
-}
-
-fn ensure(payload: RetryPayload) -> impl Future<Item = (), Error = RetryError> {
+pub fn ensure(payload: RetryPayload) -> impl Future<Item = (), Error = RetryError> {
     send(payload).map_err(|error| {
         if error.retry_no > 0 {
             // TODO send in amqp
+            info!("Sending in Rabbit")
         }
         error
     })

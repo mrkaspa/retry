@@ -4,6 +4,14 @@ version = "0.1.0"
 authors = ["Michel Perez <michel.ingesoft@gmail.com>"]
 edition = "2018"
 
+[[bin]]
+name = "web"
+path = "src/web.rs"
+
+[[bin]]
+name = "rabbit"
+path = "src/rabbit.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -17,4 +25,6 @@ serde = "1.0.94"
 failure = "0.1.5"
 log = "0.4"
 simple_logger = "1.3.0"
-
+lapin = "^0.26"
+lapin-futures = "^0.26"
+amq-protocol-types = "2.3.0"
