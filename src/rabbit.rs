@@ -1,4 +1,4 @@
-use amq_protocol_types::{AMQPValue, ShortInt, ShortString};
+use amq_protocol_types::{AMQPValue, ShortString};
 use futures::{Future, Stream};
 use lapin::options::{
     BasicConsumeOptions, BasicGetOptions, BasicPublishOptions, ExchangeBindOptions,
@@ -6,7 +6,7 @@ use lapin::options::{
     QueueDeclareOptions,
 };
 use lapin_futures::types::FieldTable;
-use lapin_futures::{BasicProperties, Channel, Client, ConnectionProperties};
+use lapin_futures::{BasicProperties, Channel, Client, ConnectionProperties, Queue};
 use log::{debug, info};
 
 fn connect(addr: &String) -> impl Future<Item = Channel, Error = lapin_futures::Error> {
@@ -14,7 +14,7 @@ fn connect(addr: &String) -> impl Future<Item = Channel, Error = lapin_futures::
         .and_then(|client| client.create_channel())
 }
 
-fn setup(ch: &Channel) -> Result<(), lapin_futures::Error> {
+fn setup(ch: &Channel) -> Result<Queue, lapin_futures::Error> {
     ch.exchange_declare(
         "retries.dlx-ex",
         "direct",
@@ -44,7 +44,8 @@ fn setup(ch: &Channel) -> Result<(), lapin_futures::Error> {
         ShortString::from(String::from("x-dead-letter-routing-key")),
         AMQPValue::ShortString(ShortString::from(String::from("do-retry"))),
     );
-    ch.queue_declare("retries.exec-queue", QueueDeclareOptions::default(), args)
+    let exec_queue = ch
+        .queue_declare("retries.exec-queue", QueueDeclareOptions::default(), args)
         .wait()?;
     ch.queue_bind(
         "retries.wait-queue",
@@ -72,74 +73,49 @@ fn setup(ch: &Channel) -> Result<(), lapin_futures::Error> {
         args,
     )
     .wait()?;
-    Ok(())
+    Ok(exec_queue)
 }
 
-fn publish(ch: Channel) {}
+fn publish(
+    ch: Channel,
+    exchange: &str,
+    routing_key: &str,
+    payload: Vec<u8>,
+) -> impl Future<Item = (), Error = lapin_futures::Error> {
+    ch.basic_publish(
+        exchange,
+        routing_key,
+        payload,
+        BasicPublishOptions::default(),
+        BasicProperties::default(),
+    )
+}
 
+#[allow(dead_code)]
 fn main() {
     simple_logger::init_with_level(log::Level::Info).unwrap();
 
     let addr = std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://127.0.0.1:5672/%2f".into());
 
-    futures::executor::spawn(
-        Client::connect(&addr, ConnectionProperties::default()).and_then(|client| {
-            client.create_channel().and_then(|channel| {
-                let id = channel.id();
-                info!("created channel with id: {}", id);
-
-                channel.queue_declare("hello", QueueDeclareOptions::default(), FieldTable::default()).and_then(move |_| {
-                    info!("channel {} declared queue {}", id, "hello");
-
-                    channel.exchange_declare("hello_exchange", "direct", ExchangeDeclareOptions::default(), FieldTable::default()).and_then(move |_| {
-                        channel.queue_bind("hello", "hello_exchange", "hello_2", QueueBindOptions::default(), FieldTable::default()).and_then(move |_| {
-                            channel.basic_publish(
-                                "hello_exchange",
-                                "hello_2",
-                                b"hello from tokio".to_vec(),
-                                BasicPublishOptions::default(),
-                                BasicProperties::default().with_user_id("guest".into()).with_reply_to("foobar".into())
-                            ).and_then(move |_| {
-                                channel.exchange_bind("hello_exchange", "amq.direct", "test_bind", ExchangeBindOptions::default(), FieldTable::default()).and_then(move |_| {
-                                    channel.exchange_unbind("hello_exchange", "amq.direct", "test_bind", ExchangeUnbindOptions::default(), FieldTable::default()).and_then(move |_| {
-                                        channel.exchange_delete("hello_exchange", ExchangeDeleteOptions::default()).and_then(move |_| {
-                                            channel.close(200, "Bye")
-                                        })
-                                    })
-                                })
-                            })
-                        })
-                    })
-                })
-            }).and_then(move |_| {
-                client.create_channel()
-            }).and_then(|channel| {
-                let id = channel.id();
-                info!("created channel with id: {}", id);
-
-                let c = channel.clone();
-                channel.queue_declare("hello", QueueDeclareOptions::default(), FieldTable::default()).and_then(move |queue| {
-                    info!("channel {} declared queue {:?}", id, queue);
-
-                    let ch = channel.clone();
-                    channel.basic_get("hello", BasicGetOptions::default()).and_then(move |message| {
-                        info!("got message: {:?}", message);
-                        let message = message.unwrap();
-                        info!("decoded message: {:?}", std::str::from_utf8(&message.delivery.data).unwrap());
-                        channel.basic_ack(message.delivery.delivery_tag, false)
-                    }).and_then(move |_| {
-                        ch.basic_consume(&queue, "my_consumer", BasicConsumeOptions::default(), FieldTable::default())
-                    })
-                }).and_then(|stream| {
-                    info!("got consumer stream");
-
-                    stream.for_each(move |message| {
-                        debug!("got message: {:?}", message);
-                        info!("decoded message: {:?}", std::str::from_utf8(&message.data).unwrap());
-                        c.basic_ack(message.delivery_tag, false)
-                    })
+    futures::executor::spawn(connect(&addr).and_then(|channel| {
+        let queue = setup(&channel).expect("setup failed");
+        channel
+            .basic_consume(
+                &queue,
+                "",
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .and_then(move |stream| {
+                stream.for_each(move |message| {
+                    println!(
+                        "consumer got '{}'",
+                        std::str::from_utf8(&message.data).unwrap()
+                    );
+                    channel.basic_ack(message.delivery_tag, false)
                 })
             })
-        }).map_err(|err| eprintln!("An error occured: {}", err))
-    ).wait_future().expect("runtime exited with failure")
+    }))
+    .wait_future()
+    .expect("runtime exited with failure");
 }
