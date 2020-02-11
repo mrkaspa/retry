@@ -12,7 +12,7 @@ pub struct GeneralError {
 }
 
 impl error::ResponseError for GeneralError {
-    fn render_response(&self) -> HttpResponse {
+    fn error_response(&self) -> HttpResponse {
         HttpResponse::build(StatusCode::from_u16(self.status).unwrap()).json2(self)
     }
 }

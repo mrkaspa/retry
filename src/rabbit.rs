@@ -1,40 +1,42 @@
 use amq_protocol_types::{AMQPValue, ShortString};
-use futures::{Future, Stream};
+use anyhow::Result;
+use futures::executor::block_on;
+use futures::{future::FutureExt, stream::StreamExt};
 use lapin::options::{
-    BasicConsumeOptions, BasicGetOptions, BasicPublishOptions, ExchangeBindOptions,
-    ExchangeDeclareOptions, ExchangeDeleteOptions, ExchangeUnbindOptions, QueueBindOptions,
-    QueueDeclareOptions,
+    BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, ExchangeDeclareOptions,
+    QueueBindOptions, QueueDeclareOptions,
 };
-use lapin_futures::types::FieldTable;
-use lapin_futures::{BasicProperties, Channel, Client, ConnectionProperties, Queue};
+use lapin::types::FieldTable;
+use lapin::{BasicProperties, Channel, Connection, ConnectionProperties, Queue};
 use log::{debug, info};
 
-fn connect(addr: &String) -> impl Future<Item = Channel, Error = lapin_futures::Error> {
-    Client::connect(&addr, ConnectionProperties::default())
-        .and_then(|client| client.create_channel())
+async fn connect(addr: &String) -> Result<Channel> {
+    let conn = Connection::connect(&addr, ConnectionProperties::default()).await?;
+    let channel = conn.create_channel().await?;
+    Ok(channel)
 }
 
-fn setup(ch: &Channel) -> Result<Queue, lapin_futures::Error> {
+async fn setup(ch: &Channel) -> Result<Queue> {
     ch.exchange_declare(
         "retries.dlx-ex",
-        "direct",
+        lapin::ExchangeKind::Direct,
         ExchangeDeclareOptions::default(),
         FieldTable::default(),
     )
-    .wait()?;
+    .await?;
     ch.exchange_declare(
         "retries.retry-ex",
-        "direct",
+        lapin::ExchangeKind::Direct,
         ExchangeDeclareOptions::default(),
         FieldTable::default(),
     )
-    .wait()?;
+    .await?;
     ch.queue_declare(
         "retries.wait-queue",
         QueueDeclareOptions::default(),
         FieldTable::default(),
     )
-    .wait()?;
+    .await?;
     let mut args = FieldTable::default();
     args.insert(
         ShortString::from(String::from("x-dead-letter-exchange")),
@@ -54,7 +56,7 @@ fn setup(ch: &Channel) -> Result<Queue, lapin_futures::Error> {
         QueueBindOptions::default(),
         FieldTable::default(),
     )
-    .wait()?;
+    .await?;
 
     let mut args = FieldTable::default();
     args.insert(
@@ -72,50 +74,72 @@ fn setup(ch: &Channel) -> Result<Queue, lapin_futures::Error> {
         QueueBindOptions::default(),
         args,
     )
-    .wait()?;
+    .await?;
     Ok(exec_queue)
 }
 
-fn publish(
-    ch: Channel,
-    exchange: &str,
-    routing_key: &str,
-    payload: Vec<u8>,
-) -> impl Future<Item = (), Error = lapin_futures::Error> {
+async fn publish(ch: Channel, exchange: &str, routing_key: &str, payload: Vec<u8>) -> Result<()> {
     ch.basic_publish(
         exchange,
         routing_key,
-        payload,
         BasicPublishOptions::default(),
+        payload,
         BasicProperties::default(),
     )
+    .await?;
+    Ok(())
+}
+
+async fn amain(addr: &String) -> Result<()> {
+    let channel = connect(addr).await?;
+    let queue = setup(&channel).await?;
+    let consumer = channel
+        .clone()
+        .basic_consume(
+            &queue,
+            "",
+            BasicConsumeOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+    consumer
+        .for_each(move |delivery| {
+            let delivery = delivery.expect("Couldn't receive delivery from RabbitMQ.");
+            channel
+                .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
+                .map(|_| ())
+        })
+        .await;
+    Ok(())
 }
 
 #[allow(dead_code)]
-fn main() {
+fn main() -> Result<()> {
     simple_logger::init_with_level(log::Level::Info).unwrap();
 
     let addr = std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://127.0.0.1:5672/%2f".into());
-
-    futures::executor::spawn(connect(&addr).and_then(|channel| {
-        let queue = setup(&channel).expect("setup failed");
-        channel
-            .basic_consume(
-                &queue,
-                "",
-                BasicConsumeOptions::default(),
-                FieldTable::default(),
-            )
-            .and_then(move |stream| {
-                stream.for_each(move |message| {
-                    println!(
-                        "consumer got '{}'",
-                        std::str::from_utf8(&message.data).unwrap()
-                    );
-                    channel.basic_ack(message.delivery_tag, false)
-                })
-            })
-    }))
-    .wait_future()
-    .expect("runtime exited with failure");
+    let future = amain(&addr);
+    block_on(future)?;
+    Ok(())
+    //     futures::executor::spawn(connect(&addr).and_then(|channel| {
+    //         let queue = setup(&channel).expect("setup failed");
+    //         channel
+    //             .basic_consume(
+    //                 &queue,
+    //                 "",
+    //                 BasicConsumeOptions::default(),
+    //                 FieldTable::default(),
+    //             )
+    //             .and_then(move |stream| {
+    //                 stream.for_each(move |message| {
+    //                     println!(
+    //                         "consumer got '{}'",
+    //                         std::str::from_utf8(&message.data).unwrap()
+    //                     );
+    //                     channel.basic_ack(message.delivery_tag, false)
+    //                 })
+    //             })
+    //     }))
+    //     .wait_future()
+    //     .expect("runtime exited with failure");
 }

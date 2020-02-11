@@ -3,11 +3,10 @@ use crate::utils::RetryError;
 use actix_http::http::{header, Method};
 use actix_http::RequestHead;
 use actix_web::client::Client;
-use futures::future::Future;
 use log::{error, info};
 
-pub fn ensure(payload: RetryPayload) -> impl Future<Item = (), Error = RetryError> {
-    send(payload).map_err(|error| {
+pub async fn ensure(payload: RetryPayload) -> Result<(), RetryError> {
+    send(payload).await.map_err(|error| {
         if error.retry_no > 0 {
             // TODO send in amqp
             info!("Sending in Rabbit")
@@ -16,7 +15,7 @@ pub fn ensure(payload: RetryPayload) -> impl Future<Item = (), Error = RetryErro
     })
 }
 
-fn send(payload: RetryPayload) -> impl Future<Item = (), Error = RetryError> {
+async fn send(payload: RetryPayload) -> Result<(), RetryError> {
     let retries = payload.retries;
 
     let mut req_head = RequestHead::default();
@@ -32,6 +31,7 @@ fn send(payload: RetryPayload) -> impl Future<Item = (), Error = RetryError> {
     Client::default()
         .request_from(payload.request_url, &req_head)
         .send_body(payload.payload)
+        .await
         .map_err(move |err| {
             error!("Error doing request {}", err);
             RetryError { retry_no: retries }
