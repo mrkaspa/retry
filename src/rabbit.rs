@@ -121,25 +121,4 @@ fn main() -> Result<()> {
     let future = amain(&addr);
     block_on(future)?;
     Ok(())
-    //     futures::executor::spawn(connect(&addr).and_then(|channel| {
-    //         let queue = setup(&channel).expect("setup failed");
-    //         channel
-    //             .basic_consume(
-    //                 &queue,
-    //                 "",
-    //                 BasicConsumeOptions::default(),
-    //                 FieldTable::default(),
-    //             )
-    //             .and_then(move |stream| {
-    //                 stream.for_each(move |message| {
-    //                     println!(
-    //                         "consumer got '{}'",
-    //                         std::str::from_utf8(&message.data).unwrap()
-    //                     );
-    //                     channel.basic_ack(message.delivery_tag, false)
-    //                 })
-    //             })
-    //     }))
-    //     .wait_future()
-    //     .expect("runtime exited with failure");
 }

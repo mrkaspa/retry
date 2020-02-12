@@ -24,10 +24,10 @@ async fn execute(json: web::Json<RetryPayload>) -> Result<HttpResponse, GeneralE
     let payload = json.into_inner();
     ensure(payload)
         .await
-        .and_then(|_| {
-            Ok(HttpResponse::Ok().json(RetryResponse {
+        .map(|_| {
+            HttpResponse::Ok().json(RetryResponse {
                 message: String::from("all ok"),
-            }))
+            })
         })
         .map_err(|err| GeneralError {
             status: 402,
