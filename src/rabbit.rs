@@ -12,11 +12,13 @@ use log::{debug, info};
 
 async fn connect(addr: &String) -> Result<Channel> {
     let conn = Connection::connect(&addr, ConnectionProperties::default()).await?;
+    info!("Connected");
     let channel = conn.create_channel().await?;
+    info!("Channel created");
     Ok(channel)
 }
 
-async fn setup(ch: &Channel) -> Result<Queue> {
+async fn setup(ch: &Channel) -> Result<String> {
     ch.exchange_declare(
         "retries.dlx-ex",
         lapin::ExchangeKind::Direct,
@@ -46,8 +48,7 @@ async fn setup(ch: &Channel) -> Result<Queue> {
         ShortString::from(String::from("x-dead-letter-routing-key")),
         AMQPValue::ShortString(ShortString::from(String::from("do-retry"))),
     );
-    let exec_queue = ch
-        .queue_declare("retries.exec-queue", QueueDeclareOptions::default(), args)
+    ch.queue_declare("retries.exec-queue", QueueDeclareOptions::default(), args)
         .wait()?;
     ch.queue_bind(
         "retries.wait-queue",
@@ -75,7 +76,7 @@ async fn setup(ch: &Channel) -> Result<Queue> {
         args,
     )
     .await?;
-    Ok(exec_queue)
+    Ok(String::from("retries.exec-queue"))
 }
 
 async fn publish(ch: Channel, exchange: &str, routing_key: &str, payload: Vec<u8>) -> Result<()> {
@@ -93,6 +94,7 @@ async fn publish(ch: Channel, exchange: &str, routing_key: &str, payload: Vec<u8
 async fn amain(addr: &String) -> Result<()> {
     let channel = connect(addr).await?;
     let queue = setup(&channel).await?;
+    info!("consuming");
     let consumer = channel
         .clone()
         .basic_consume(
