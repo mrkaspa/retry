@@ -4,10 +4,7 @@ use lapin::options::{
     BasicPublishOptions, ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
 };
 use lapin::types::{AMQPValue, FieldTable};
-use lapin::{
-    options::*, publisher_confirm::Confirmation, BasicProperties, Channel, Connection,
-    ConnectionProperties,
-};
+use lapin::{options::*, BasicProperties, Channel, Connection, ConnectionProperties};
 use log::{debug, info};
 
 async fn connect(addr: &String) -> Result<Channel> {
@@ -90,7 +87,7 @@ async fn publish(ch: Channel, exchange: &str, routing_key: &str, payload: Vec<u8
 async fn amain(addr: &String) -> Result<()> {
     let channel = connect(addr).await?;
     let queue = setup(&channel).await?;
-    let mut consumer = channel
+    let consumer = channel
         .basic_consume(
             queue,
             "my_consumer",
