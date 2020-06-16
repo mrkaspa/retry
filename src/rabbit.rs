@@ -1,11 +1,13 @@
-use amq_protocol_types::{AMQPValue, ShortString};
 use anyhow::Result;
 use futures::executor::block_on;
 use lapin::options::{
     BasicPublishOptions, ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
 };
-use lapin::types::FieldTable;
-use lapin::{BasicProperties, Channel, Connection, ConnectionProperties};
+use lapin::types::{AMQPValue, FieldTable};
+use lapin::{
+    options::*, publisher_confirm::Confirmation, BasicProperties, Channel, Connection,
+    ConnectionProperties,
+};
 use log::{debug, info};
 
 async fn connect(addr: &String) -> Result<Channel> {
@@ -16,7 +18,7 @@ async fn connect(addr: &String) -> Result<Channel> {
     Ok(channel)
 }
 
-async fn setup(ch: &Channel) -> Result<String> {
+async fn setup(ch: &Channel) -> Result<&str> {
     ch.exchange_declare(
         "retries.dlx-ex",
         lapin::ExchangeKind::Direct,
@@ -37,17 +39,6 @@ async fn setup(ch: &Channel) -> Result<String> {
         FieldTable::default(),
     )
     .await?;
-    let mut args = FieldTable::default();
-    args.insert(
-        ShortString::from(String::from("x-dead-letter-exchange")),
-        AMQPValue::ShortString(ShortString::from(String::from("retries.dlx-ex"))),
-    );
-    args.insert(
-        ShortString::from(String::from("x-dead-letter-routing-key")),
-        AMQPValue::ShortString(ShortString::from(String::from("do-retry"))),
-    );
-    ch.queue_declare("retries.exec-queue", QueueDeclareOptions::default(), args)
-        .await?;
     ch.queue_bind(
         "retries.wait-queue",
         "retries.dlx-ex",
@@ -58,12 +49,20 @@ async fn setup(ch: &Channel) -> Result<String> {
     .await?;
     let mut args = FieldTable::default();
     args.insert(
-        ShortString::from(String::from("x-message-ttl")),
-        AMQPValue::ShortInt(5000),
+        "x-dead-letter-exchange".into(),
+        AMQPValue::LongString("retries.dlx-ex".into()),
     );
     args.insert(
-        ShortString::from(String::from("x-dead-letter-exchange")),
-        AMQPValue::ShortString(ShortString::from(String::from("retries.retry-ex"))),
+        "x-dead-letter-routing-key".into(),
+        AMQPValue::LongString("do-retry".into()),
+    );
+    ch.queue_declare("retries.exec-queue", QueueDeclareOptions::default(), args)
+        .await?;
+    let mut args = FieldTable::default();
+    args.insert("x-message-ttl".into(), 5000.into());
+    args.insert(
+        "x-dead-letter-exchange".into(),
+        AMQPValue::LongString("retries.retry-ex".into()),
     );
     ch.queue_bind(
         "retries.exec-queue",
@@ -73,7 +72,7 @@ async fn setup(ch: &Channel) -> Result<String> {
         args,
     )
     .await?;
-    Ok(String::from("retries.exec-queue"))
+    Ok("retries.exec-queue")
 }
 
 async fn publish(ch: Channel, exchange: &str, routing_key: &str, payload: Vec<u8>) -> Result<()> {
@@ -91,7 +90,22 @@ async fn publish(ch: Channel, exchange: &str, routing_key: &str, payload: Vec<u8
 async fn amain(addr: &String) -> Result<()> {
     let channel = connect(addr).await?;
     let queue = setup(&channel).await?;
-    info!("consuming");
+    let mut consumer = channel
+        .basic_consume(
+            queue,
+            "my_consumer",
+            BasicConsumeOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+    info!("will consume");
+    for delivery in consumer {
+        let (channel, delivery) = delivery.expect("error in consumer");
+        channel
+            .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
+            .await
+            .expect("ack");
+    }
     Ok(())
 }
 
