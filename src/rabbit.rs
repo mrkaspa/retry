@@ -1,13 +1,11 @@
 use amq_protocol_types::{AMQPValue, ShortString};
 use anyhow::Result;
 use futures::executor::block_on;
-use futures::{future::FutureExt, stream::StreamExt};
 use lapin::options::{
-    BasicAckOptions, BasicConsumeOptions, BasicPublishOptions, ExchangeDeclareOptions,
-    QueueBindOptions, QueueDeclareOptions,
+    BasicPublishOptions, ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions,
 };
 use lapin::types::FieldTable;
-use lapin::{BasicProperties, Channel, Connection, ConnectionProperties, Queue};
+use lapin::{BasicProperties, Channel, Connection, ConnectionProperties};
 use log::{debug, info};
 
 async fn connect(addr: &String) -> Result<Channel> {
@@ -49,7 +47,7 @@ async fn setup(ch: &Channel) -> Result<String> {
         AMQPValue::ShortString(ShortString::from(String::from("do-retry"))),
     );
     ch.queue_declare("retries.exec-queue", QueueDeclareOptions::default(), args)
-        .wait()?;
+        .await?;
     ch.queue_bind(
         "retries.wait-queue",
         "retries.dlx-ex",
@@ -58,7 +56,6 @@ async fn setup(ch: &Channel) -> Result<String> {
         FieldTable::default(),
     )
     .await?;
-
     let mut args = FieldTable::default();
     args.insert(
         ShortString::from(String::from("x-message-ttl")),
@@ -95,23 +92,6 @@ async fn amain(addr: &String) -> Result<()> {
     let channel = connect(addr).await?;
     let queue = setup(&channel).await?;
     info!("consuming");
-    let consumer = channel
-        .clone()
-        .basic_consume(
-            &queue,
-            "",
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        )
-        .await?;
-    consumer
-        .for_each(move |delivery| {
-            let delivery = delivery.expect("Couldn't receive delivery from RabbitMQ.");
-            channel
-                .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
-                .map(|_| ())
-        })
-        .await;
     Ok(())
 }
 
