@@ -5,7 +5,7 @@ use lapin::options::{
 };
 use lapin::types::{AMQPValue, FieldTable};
 use lapin::{options::*, BasicProperties, Channel, Connection, ConnectionProperties};
-use log::{debug, info};
+use log::info;
 
 async fn connect(addr: &String) -> Result<Channel> {
     let conn = Connection::connect(&addr, ConnectionProperties::default()).await?;

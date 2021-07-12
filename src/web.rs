@@ -6,7 +6,7 @@ use log::{self, info};
 use serde::Serialize;
 use simple_logger;
 mod ensure;
-mod rabbit;
+// mod rabbit;
 mod structs;
 mod utils;
 
